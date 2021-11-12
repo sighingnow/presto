@@ -1,0 +1,344 @@
+/*
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.facebook.presto.vineyard.impl.arrow;
+
+import com.facebook.airlift.log.Logger;
+import com.facebook.presto.spi.HostAddress;
+import com.facebook.presto.spi.NodeManager;
+import com.facebook.presto.vineyard.VineyardConfig;
+import com.facebook.presto.vineyard.VineyardSession;
+import com.facebook.presto.vineyard.VineyardTable;
+import com.google.common.base.Supplier;
+import com.google.common.base.Suppliers;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.collect.ImmutableMap;
+import io.v6d.core.common.util.VineyardException;
+import io.v6d.modules.basic.arrow.Arrow;
+import io.v6d.modules.basic.columnar.ColumnarData;
+import io.v6d.modules.basic.columnar.ColumnarDataBuilder;
+import lombok.SneakyThrows;
+import lombok.val;
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.BigIntVector;
+import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.Float4Vector;
+import org.apache.arrow.vector.Float8Vector;
+import org.apache.arrow.vector.IntVector;
+import org.apache.arrow.vector.LargeVarBinaryVector;
+import org.apache.arrow.vector.LargeVarCharVector;
+import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.ipc.ArrowFileReader;
+import org.apache.arrow.vector.ipc.ArrowStreamWriter;
+import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.types.pojo.Schema;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.FilenameFilter;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.ExecutionException;
+import java.util.stream.Collectors;
+
+import static com.google.common.base.Preconditions.checkState;
+
+public class ArrowClient
+        extends VineyardSession
+{
+    private final Logger log = Logger.get(ArrowClient.class);
+    private static final String SCHEMA_NAME = "arrow";
+
+    private BufferAllocator allocator;
+    private ConcurrentMap<String, ArrowFileReader> readers;
+    private Cache<String, Map<Integer, HostAddress>> tableSplits;
+
+    public ArrowClient(VineyardConfig config, NodeManager manager)
+    {
+        super(config, manager);
+
+        log.info("initializing arrow client");
+        this.allocator = new RootAllocator();
+        this.readers = new ConcurrentSkipListMap<>();
+        this.schemas = Suppliers.memoize(schemasSupplier(config.getArrowRoot()));
+        this.tableSplits = CacheBuilder.newBuilder().build();
+    }
+
+    @Override
+    public String getTablePath(String schema, String tableName)
+    {
+        return config.getArrowRoot() + "/" + tableName + ".arrow";
+    }
+
+    @Override
+    public int getSplitSize(String schema, String tableName)
+    {
+        return getTableSplits(schema, tableName).size();
+    }
+
+    @Override
+    @SneakyThrows(ExecutionException.class)
+    public Map<Integer, HostAddress> getTableSplits(String schema, String tableName)
+    {
+        val tablePath = getTablePath(schema, tableName);
+        return tableSplits.get(tableName, new Callable<Map<Integer, HostAddress>>()
+        {
+            @Override
+            @SneakyThrows(IOException.class)
+            public Map<Integer, HostAddress> call()
+            {
+                val reader = readers.get(tablePath);
+                val splits = new ConcurrentSkipListMap<Integer, HostAddress>();
+                for (int index = 0; index < reader.getRecordBlocks().size(); ++index) {
+                    splits.put(index, manager.getCurrentNode().getHostAndPort());
+                }
+                return splits;
+            }
+        });
+    }
+
+    private Supplier<Map<String, Map<String, VineyardTable>>> schemasSupplier
+            (String arrowRoot)
+    {
+        return () -> {
+            try {
+                return readSchema(arrowRoot);
+            }
+            catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        };
+    }
+
+    private Map<String, Map<String, VineyardTable>> readSchema(
+            String arrowRoot)
+            throws IOException
+    {
+        Logger log = Logger.get(ArrowClient.class);
+
+        val schema = new HashMap<String, Map<String, VineyardTable>>();
+        val tables = new HashMap<String, VineyardTable>();
+
+        File file = new File(arrowRoot);
+        String[] arrowfiles = file.list(new FilenameFilter()
+        {
+            @Override
+            public boolean accept(File dir, String name)
+            {
+                return name.endsWith(".arrow");
+            }
+        });
+        for (val arrowfile : arrowfiles) {
+            val tablePath = arrowRoot + "/" + arrowfile;
+            val tableName = arrowfile.substring(0, tablePath.length() - ".arrow".length());
+            try {
+                val reader = new ArrowFileReader(new FileInputStream(tablePath).getChannel(), allocator);
+                val table = reader.getVectorSchemaRoot();
+
+                this.readers.put(tablePath, reader);
+                tables.put(tableName, buildTableSchemaFromArrowSchema(table.getSchema(), tableName, tablePath));
+            }
+            catch (IOException e) {
+                log.error("Failed to read the schema from arrow file: %s", e);
+                throw new UncheckedIOException(e);
+            }
+        }
+        schema.put(SCHEMA_NAME, tables);
+        return ImmutableMap.copyOf(schema);
+    }
+
+    @Override
+    public List<ColumnarData> loadSplit(String tablePath, int splitIndex)
+            throws IOException
+    {
+        if (!this.readers.containsKey(tablePath)) {
+            log.error("reader not found for %s", tablePath);
+            throw new IOException("reader not found: " + tablePath);
+        }
+        val reader = this.readers.get(tablePath);
+        val table = reader.getVectorSchemaRoot();
+        checkState(reader.loadRecordBatch(reader.getRecordBlocks().get(splitIndex)), "Failed to load recordbatch from the input stream");
+
+        log.info("row counts = %d, column counts = %d", table.getRowCount(), table.getFieldVectors().size());
+        return table.getFieldVectors().stream().filter(field -> !skipType(field.getField().getType())).map(field -> {
+            return new ColumnarData(field);
+        }).collect(Collectors.toList());
+    }
+
+    @Override
+    public VineyardSession.TableBuilder createTableBuilder(String tableName, Schema schema)
+    {
+        return new ArrowTableBuilder(tableName, schema);
+    }
+
+    @Override
+    @SneakyThrows(IOException.class)
+    public void dropTable(String schemaName, String tableName)
+    {
+        assert schemaName.equals(SCHEMA_NAME);
+        if (!readers.containsKey(tableName)) {
+            throw new IndexOutOfBoundsException("table '" + tableName + "' doesn't exist");
+        }
+        val tables = schemas.get().get(SCHEMA_NAME);
+        val reader = readers.get(tableName);
+        reader.close();
+        readers.remove(tableName);
+        tables.remove(tableName);
+    }
+
+    public class ArrowChunkBuilder
+            extends ChunkBuilder
+    {
+        private final List<FieldVector> vectors;
+        private final List<ColumnarDataBuilder> builders;
+
+        public ArrowChunkBuilder(Schema schema, int rows)
+        {
+            this.vectors = schema.getFields().stream().map(field -> {
+                val vector = builderForField(field);
+                vector.setValueCount(rows);
+                return vector;
+            }).collect(Collectors.toList());
+            this.builders = this.vectors.stream().map(vector -> {
+                return new ColumnarDataBuilder(vector);
+            }).collect(Collectors.toList());
+        }
+
+        public ArrowChunkBuilder(Schema schema, int rows, List<FieldVector> vectors)
+        {
+            this.vectors = vectors;
+            this.builders = this.vectors.stream().map(vector -> {
+                return new ColumnarDataBuilder(vector);
+            }).collect(Collectors.toList());
+        }
+
+        @SneakyThrows(VineyardException.class)
+        private FieldVector builderForField(Field field)
+        {
+            FieldVector vector;
+            if (field.getType().equals(Arrow.Type.Int)) {
+                vector = new IntVector(field, Arrow.default_allocator);
+            }
+            else if (field.getType().equals(Arrow.Type.Int64)) {
+                vector = new BigIntVector(field, Arrow.default_allocator);
+            }
+            else if (field.getType().equals(Arrow.Type.Float)) {
+                vector = new Float4Vector(field, Arrow.default_allocator);
+            }
+            else if (field.getType().equals(Arrow.Type.Double)) {
+                vector = new Float8Vector(field, Arrow.default_allocator);
+            }
+            else if (field.getType().equals(Arrow.Type.VarChar)) {
+                vector = new LargeVarCharVector(field, Arrow.default_allocator);
+            }
+            else if (field.getType().equals(Arrow.Type.VarBinary)) {
+                vector = new LargeVarBinaryVector(field, Arrow.default_allocator);
+            }
+            else {
+                throw new VineyardException.NotImplemented(
+                        "array builder for type " + field.getType() + " is not supported");
+            }
+            return vector;
+        }
+
+        @Override
+        public List<ColumnarDataBuilder> getColumns()
+        {
+            return this.builders;
+        }
+
+        @Override
+        public ColumnarDataBuilder getColumn(int index)
+        {
+            return this.builders.get(index);
+        }
+    }
+
+    public class ArrowTableBuilder
+            extends TableBuilder
+    {
+        private final String tablePath;
+
+        private final List<FieldVector> vectors;
+        private final VectorSchemaRoot root;
+        private final FileOutputStream output;
+        private final ArrowStreamWriter writer;
+
+        @SneakyThrows(IOException.class)
+        public ArrowTableBuilder(String tableName, Schema schema)
+        {
+            super(tableName, schema);
+            this.tablePath = config.getArrowRoot() + "/" + tableName + ".arrow";
+            this.vectors = schema.getFields().stream().map(field -> field.createVector(Arrow.default_allocator)).collect(Collectors.toList());
+            this.root = new VectorSchemaRoot(this.vectors);
+            this.output = new FileOutputStream(tablePath);
+            this.writer = new ArrowStreamWriter(root, null, this.output.getChannel());
+
+            // start the writter
+            this.writer.start();
+            writer.writeBatch();
+        }
+
+        @Override
+        public ChunkBuilder createChunk(int rows)
+        {
+            val fields = this.root.getFieldVectors();
+            for (val field : fields) {
+                field.reset();
+            }
+            this.root.setRowCount(rows);  // nb. setRowCount is required
+            return new ArrowChunkBuilder(schema, rows, this.root.getFieldVectors());
+        }
+
+        @Override
+        @SneakyThrows(IOException.class)
+        public void finishChunk(ChunkBuilder builder)
+        {
+            for (val field : this.root.getFieldVectors()) {
+                log.debug("field = %s, value count = %d",
+                        field.getField(),
+                        field.getValueCount());
+            }
+            this.writer.writeBatch();
+        }
+
+        @Override
+        public void finish()
+        {
+            log.info("finishing writing arrow files");
+            this.writer.close();
+
+            try {
+                val reader = new ArrowFileReader(new FileInputStream(tablePath).getChannel(), allocator);
+                val table = reader.getVectorSchemaRoot();
+
+                val tables = schemas.get().get(SCHEMA_NAME);
+                readers.put(tablePath, reader);
+                tables.put(tableName, buildTableSchemaFromArrowSchema(table.getSchema(), tableName, tablePath));
+            }
+            catch (IOException e) {
+                log.error("Failed to read the schema from arrow file: %s", e);
+                throw new UncheckedIOException(e);
+            }
+        }
+    }
+}
