@@ -87,58 +87,58 @@
     </properties>
 
     <modules>
-        <module>presto-atop</module>
+<!--        <module>presto-atop</module>-->
         <module>presto-spi</module>
         <module>presto-array</module>
         <module>presto-cache</module>
         <module>presto-jmx</module>
         <module>presto-record-decoder</module>
-        <module>presto-kafka</module>
-        <module>presto-redis</module>
-        <module>presto-accumulo</module>
-        <module>presto-cassandra</module>
-        <module>presto-bigquery</module>
+<!--        <module>presto-kafka</module>-->
+<!--        <module>presto-redis</module>-->
+<!--        <module>presto-accumulo</module>-->
+<!--        <module>presto-cassandra</module>-->
+<!--        <module>presto-bigquery</module>-->
         <module>presto-blackhole</module>
         <module>presto-memory</module>
         <module>presto-orc</module>
         <module>presto-parquet</module>
         <module>presto-rcfile</module>
-        <module>presto-hive</module>
-        <module>presto-hive-common</module>
-        <module>presto-hive-hadoop2</module>
-        <module>presto-hive-metastore</module>
-        <module>presto-iceberg</module>
+<!--        <module>presto-hive</module>-->
+<!--        <module>presto-hive-common</module>-->
+<!--        <module>presto-hive-hadoop2</module>-->
+<!--        <module>presto-hive-metastore</module>-->
+<!--        <module>presto-iceberg</module>-->
         <module>presto-i18n-functions</module>
         <module>presto-teradata-functions</module>
         <module>presto-example-http</module>
         <module>presto-local-file</module>
-        <module>presto-tpch</module>
-        <module>presto-tpcds</module>
-        <module>presto-raptor</module>
-        <module>presto-base-jdbc</module>
-        <module>presto-testing-docker</module>
-        <module>presto-mysql</module>
-        <module>presto-oracle</module>
-        <module>presto-postgresql</module>
-        <module>presto-prometheus</module>
-        <module>presto-redshift</module>
-        <module>presto-sqlserver</module>
-        <module>presto-mongodb</module>
+<!--        <module>presto-tpch</module>-->
+<!--        <module>presto-tpcds</module>-->
+<!--        <module>presto-raptor</module>-->
+<!--        <module>presto-base-jdbc</module>-->
+<!--        <module>presto-testing-docker</module>-->
+<!--        <module>presto-mysql</module>-->
+<!--        <module>presto-oracle</module>-->
+<!--        <module>presto-postgresql</module>-->
+<!--        <module>presto-prometheus</module>-->
+<!--        <module>presto-redshift</module>-->
+<!--        <module>presto-sqlserver</module>-->
+<!--        <module>presto-mongodb</module>-->
         <module>presto-bytecode</module>
         <module>presto-client</module>
         <module>presto-parser</module>
         <module>presto-main</module>
-        <module>presto-ml</module>
-        <module>presto-geospatial</module>
-        <module>presto-geospatial-toolkit</module>
-        <module>presto-benchmark</module>
-        <module>presto-tests</module>
-        <module>presto-product-tests</module>
-        <module>presto-jdbc</module>
-        <module>presto-pinot</module>
-        <module>presto-pinot-toolkit</module>
+<!--        <module>presto-ml</module>-->
+<!--        <module>presto-geospatial</module>-->
+<!--        <module>presto-geospatial-toolkit</module>-->
+<!--        <module>presto-benchmark</module>-->
+<!--        <module>presto-tests</module>-->
+<!--        <module>presto-product-tests</module>-->
+<!--        <module>presto-jdbc</module>-->
+<!--        <module>presto-pinot</module>-->
+<!--        <module>presto-pinot-toolkit</module>-->
         <module>presto-cli</module>
-        <module>presto-benchmark-driver</module>
+<!--        <module>presto-benchmark-driver</module>-->
         <module>presto-server</module>
 <!--        <module>presto-server-rpm</module>-->
 <!--        <module>presto-docs</module>-->
@@ -148,30 +148,30 @@
         <module>presto-resource-group-managers</module>
         <module>presto-password-authenticators</module>
         <module>presto-session-property-managers</module>
-        <module>presto-benchto-benchmarks</module>
-        <module>presto-thrift-api</module>
-        <module>presto-thrift-testing-server</module>
-        <module>presto-thrift-connector</module>
+<!--        <module>presto-benchto-benchmarks</module>-->
+<!--        <module>presto-thrift-api</module>-->
+<!--        <module>presto-thrift-testing-server</module>-->
+<!--        <module>presto-thrift-connector</module>-->
         <module>presto-matching</module>
         <module>presto-memory-context</module>
         <module>presto-proxy</module>
-        <module>presto-kudu</module>
-        <module>presto-elasticsearch</module>
+<!--        <module>presto-kudu</module>-->
+<!--        <module>presto-elasticsearch</module>-->
         <module>presto-function-namespace-managers</module>
         <module>presto-expressions</module>
-        <module>presto-benchmark-runner</module>
-        <module>presto-spark-classloader-interface</module>
-        <module>presto-spark-base</module>
-        <module>presto-spark-common</module>
-        <module>presto-spark</module>
-        <module>presto-spark-package</module>
-        <module>presto-spark-launcher</module>
-        <module>presto-spark-testing</module>
-        <module>presto-druid</module>
+<!--        <module>presto-benchmark-runner</module>-->
+<!--        <module>presto-spark-classloader-interface</module>-->
+<!--        <module>presto-spark-base</module>-->
+<!--        <module>presto-spark-common</module>-->
+<!--        <module>presto-spark</module>-->
+<!--        <module>presto-spark-package</module>-->
+<!--        <module>presto-spark-launcher</module>-->
+<!--        <module>presto-spark-testing</module>-->
+<!--        <module>presto-druid</module>-->
         <module>presto-common</module>
-        <module>presto-thrift-testing-udf-server</module>
-        <module>presto-thrift-spec</module>
-        <module>presto-testng-services</module>
+<!--        <module>presto-thrift-testing-udf-server</module>-->
+<!--        <module>presto-thrift-spec</module>-->
+<!--        <module>presto-testng-services</module>-->
         <module>presto-node-ttl-fetchers</module>
         <module>presto-cluster-ttl-providers</module>
         <module>presto-vineyard</module>
