@@ -66,7 +66,7 @@ public class VineyardClient
 
         log.info("initializing vineyard client");
 
-        this.client = new IPCClient();
+        this.client = new IPCClient(config.getVineyardSocket());
         this.batches = new ConcurrentSkipListMap<>();
         this.schemas = Suppliers.memoize(schemasSupplier(this.client));
         this.tableSplits = CacheBuilder.newBuilder().build();
