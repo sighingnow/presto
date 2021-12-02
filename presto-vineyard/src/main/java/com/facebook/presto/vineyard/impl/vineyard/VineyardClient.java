@@ -161,16 +161,17 @@ public class VineyardClient
     public List<ColumnarData> loadSplit(String tablePath, int splitIndex)
             throws IOException
     {
+        long timeUsage = 0;
         if (!this.batches.containsKey(tablePath)) {
             log.error("reader not found for %s", tablePath);
             throw new IOException("reader not found: " + tablePath);
         }
+        timeUsage -= System.currentTimeMillis();
         val table = this.batches.get(tablePath);
         val batch = table.getBatch(splitIndex).getBatch();
-        log.info("split index = %d, row counts = %d, column counts = %d",
-                splitIndex,
-                batch.getRowCount(),
-                batch.getFieldVectors().size());
+
+        log.info("[timing][vineyard]: load split for %d use %d", splitIndex, System.currentTimeMillis() - timeUsage);
+
         return batch.getFieldVectors().stream().filter(field -> !skipType(field.getField().getType())).map(field -> {
             return new ColumnarData(field);
         }).collect(Collectors.toList());
@@ -268,14 +269,13 @@ public class VineyardClient
     public class VineyardTableBuilder
             extends TableBuilder
     {
-        private final io.v6d.modules.basic.arrow.TableBuilder tableBuilder;
         private long timeUsage = 0;
+        private final io.v6d.modules.basic.arrow.TableBuilder tableBuilder;
 
         public VineyardTableBuilder(String tableName, Schema schema)
         {
             super(tableName, schema);
             this.tableBuilder = new io.v6d.modules.basic.arrow.TableBuilder(client, SchemaBuilder.fromSchema(schema));
-            this.timeUsage -= System.currentTimeMillis();
         }
 
         @Override
@@ -288,15 +288,17 @@ public class VineyardClient
         @Override
         public void finishChunk(ChunkBuilder builder)
         {
+            timeUsage -= System.currentTimeMillis();
             val chunk = (VineyardChunkBuilder) builder;
-            chunk.dumper(10);
             tableBuilder.addBatch(chunk.getBatch());
+            timeUsage += System.currentTimeMillis();
         }
 
         @Override
         @SneakyThrows(VineyardException.class)
         public void finish()
         {
+            timeUsage -= System.currentTimeMillis();
             val meta = tableBuilder.seal(client);
             log.info("create vineyard table: %s, object is %s", tableName, meta.getId());
 
@@ -312,6 +314,7 @@ public class VineyardClient
             tables.put(id, prestoTable);
             batches.put(tableName, table);
             tables.put(tableName, prestoTable);
+
             timeUsage += System.currentTimeMillis();
 
             log.info("[timing][vineyard]: create-then-finish tables use %d", timeUsage);

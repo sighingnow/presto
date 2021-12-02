@@ -77,6 +77,7 @@ public class ArrowClient
         super(config, manager);
 
         log.info("initializing arrow client");
+
         this.allocator = new RootAllocator();
         this.readers = new ConcurrentSkipListMap<>();
         this.schemas = Suppliers.memoize(schemasSupplier(config.getArrowRoot()));
@@ -133,11 +134,11 @@ public class ArrowClient
             String arrowRoot)
             throws IOException
     {
-        Logger log = Logger.get(ArrowClient.class);
-
+        long timeUsage = 0;
         val schema = new HashMap<String, Map<String, VineyardTable>>();
         val tables = new HashMap<String, VineyardTable>();
 
+        timeUsage -= System.currentTimeMillis();
         File file = new File(arrowRoot);
         String[] arrowfiles = file.list(new FilenameFilter()
         {
@@ -162,6 +163,10 @@ public class ArrowClient
                 throw new UncheckedIOException(e);
             }
         }
+
+        timeUsage += System.currentTimeMillis();
+        log.info("[timing][arrow]: initializing tables use %d", System.currentTimeMillis() - timeUsage);
+
         schema.put(SCHEMA_NAME, tables);
         return ImmutableMap.copyOf(schema);
     }
@@ -170,15 +175,18 @@ public class ArrowClient
     public List<ColumnarData> loadSplit(String tablePath, int splitIndex)
             throws IOException
     {
+        long timeUsage = 0;
         if (!this.readers.containsKey(tablePath)) {
             log.error("reader not found for %s", tablePath);
             throw new IOException("reader not found: " + tablePath);
         }
+        timeUsage -= System.currentTimeMillis();
         val reader = this.readers.get(tablePath);
         val table = reader.getVectorSchemaRoot();
         checkState(reader.loadRecordBatch(reader.getRecordBlocks().get(splitIndex)), "Failed to load recordbatch from the input stream");
 
-        log.info("row counts = %d, column counts = %d", table.getRowCount(), table.getFieldVectors().size());
+        log.info("[timing][arrow]: load split for %d use %d", splitIndex, System.currentTimeMillis() - timeUsage);
+
         return table.getFieldVectors().stream().filter(field -> !skipType(field.getField().getType())).map(field -> {
             return new ColumnarData(field);
         }).collect(Collectors.toList());
@@ -276,8 +284,8 @@ public class ArrowClient
     public class ArrowTableBuilder
             extends TableBuilder
     {
+        private long timeUsage = 0;
         private final String tablePath;
-
         private final List<FieldVector> vectors;
         private final VectorSchemaRoot root;
         private final FileOutputStream output;
@@ -313,17 +321,15 @@ public class ArrowClient
         @SneakyThrows(IOException.class)
         public void finishChunk(ChunkBuilder builder)
         {
-            for (val field : this.root.getFieldVectors()) {
-                log.debug("field = %s, value count = %d",
-                        field.getField(),
-                        field.getValueCount());
-            }
+            timeUsage -= System.currentTimeMillis();
             this.writer.writeBatch();
+            timeUsage += System.currentTimeMillis();
         }
 
         @Override
         public void finish()
         {
+            timeUsage -= System.currentTimeMillis();
             log.info("finishing writing arrow files");
             this.writer.close();
 
@@ -339,6 +345,9 @@ public class ArrowClient
                 log.error("Failed to read the schema from arrow file: %s", e);
                 throw new UncheckedIOException(e);
             }
+
+            timeUsage += System.currentTimeMillis();
+            log.info("[timing][arrow]: create-then-finish tables use %d", timeUsage);
         }
     }
 }

@@ -118,7 +118,12 @@ public class PageColumnSink
 
     public void move(final Block block, final Type type)
     {
-        mover.move(block, type);
+        mover.move(block, type, 0);
+    }
+
+    public void move(final Block block, final Type type, final int start_offset)
+    {
+        mover.move(block, type, start_offset);
     }
 
     public void close()
@@ -135,15 +140,14 @@ public class PageColumnSink
             this.vector = vector;
         }
 
-        public void move(final Block block, final Type type)
+        public void move(final Block block, final Type type, final int start_offset)
         {
-            assert block.getPositionCount() == vector.getValueCount();
             for (int index = 0; index < block.getPositionCount(); ++index) {
-                move(block, type, index);
+                move(block, type, start_offset, index);
             }
         }
 
-        public abstract void move(final Block block, final Type type, int index);
+        public abstract void move(final Block block, final Type type, final int start_offset, final int index);
     }
 
     private static class BooleanMover
@@ -159,9 +163,9 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
-            this.accessor.set(index, type.getBoolean(block, index) ? 1 : 0);
+            this.accessor.set(start_offset + index, type.getBoolean(block, index) ? 1 : 0);
         }
     }
 
@@ -178,9 +182,9 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
-            this.accessor.set(index, block.getByte(index));
+            this.accessor.set(start_offset + index, block.getByte(index));
         }
     }
 
@@ -197,9 +201,9 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
-            this.accessor.set(index, block.getShort(index));
+            this.accessor.set(start_offset + index, block.getShort(index));
         }
     }
 
@@ -216,9 +220,9 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
-            this.accessor.set(index, block.getInt(index));
+            this.accessor.set(start_offset + index, block.getInt(index));
         }
     }
 
@@ -235,9 +239,9 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
-            this.accessor.set(index, block.getLong(index));
+            this.accessor.set(start_offset + index, block.getLong(index));
         }
     }
 
@@ -254,9 +258,9 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
-            this.accessor.set(index, (float) type.getDouble(block, index));
+            this.accessor.set(start_offset + index, (float) type.getDouble(block, index));
         }
     }
 
@@ -273,9 +277,9 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
-            this.accessor.set(index, type.getDouble(block, index));
+            this.accessor.set(start_offset + index, type.getDouble(block, index));
         }
     }
 
@@ -292,9 +296,9 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
-            this.accessor.set(index, Decimals.readBigDecimal((DecimalType) type, block, index));
+            this.accessor.set(start_offset + index, Decimals.readBigDecimal((DecimalType) type, block, index));
         }
     }
 
@@ -312,9 +316,9 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
-            this.accessor.set(index, new Text(type.getSlice(block, index).getBytes()));
+            this.accessor.set(start_offset + index, new Text(type.getSlice(block, index).getBytes()));
         }
     }
 
@@ -332,9 +336,9 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
-            this.accessor.setSafe(index, new Text(type.getSlice(block, index).getBytes()));
+            this.accessor.setSafe(start_offset + index, new Text(type.getSlice(block, index).getBytes()));
         }
     }
 
@@ -351,9 +355,9 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
-            this.accessor.setSafe(index, type.getSlice(block, index).getBytes());
+            this.accessor.setSafe(start_offset + index, type.getSlice(block, index).getBytes());
         }
     }
 
@@ -370,9 +374,9 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
-            this.accessor.set(index, type.getSlice(block, index).getBytes());
+            this.accessor.set(start_offset + index, type.getSlice(block, index).getBytes());
         }
     }
 
@@ -389,7 +393,7 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
         }
     }
@@ -407,7 +411,7 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
         }
     }
@@ -425,7 +429,7 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
         }
     }
@@ -439,10 +443,10 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type) {}
+        public void move(final Block block, final Type type, final int start_offset) {}
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
         }
     }
@@ -460,7 +464,7 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
         }
     }
@@ -479,7 +483,7 @@ public class PageColumnSink
         }
 
         @Override
-        public void move(final Block block, final Type type, int index)
+        public void move(final Block block, final Type type, final int start_offset, final int index)
         {
         }
     }
