@@ -41,6 +41,7 @@ import org.apache.arrow.vector.LargeVarBinaryVector;
 import org.apache.arrow.vector.LargeVarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.ipc.ArrowFileReader;
+import org.apache.arrow.vector.ipc.ArrowFileWriter;
 import org.apache.arrow.vector.ipc.ArrowStreamWriter;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
@@ -150,7 +151,7 @@ public class ArrowClient
         });
         for (val arrowfile : arrowfiles) {
             val tablePath = arrowRoot + "/" + arrowfile;
-            val tableName = arrowfile.substring(0, tablePath.length() - ".arrow".length());
+            val tableName = arrowfile.substring(0, arrowfile.length() - ".arrow".length());
             try {
                 val reader = new ArrowFileReader(new FileInputStream(tablePath).getChannel(), allocator);
                 val table = reader.getVectorSchemaRoot();
@@ -181,10 +182,11 @@ public class ArrowClient
             throw new IOException("reader not found: " + tablePath);
         }
         timeUsage -= System.currentTimeMillis();
-        val reader = this.readers.get(tablePath);
+        val reader = new ArrowFileReader(new FileInputStream(tablePath).getChannel(), allocator);
         val table = reader.getVectorSchemaRoot();
         checkState(reader.loadRecordBatch(reader.getRecordBlocks().get(splitIndex)), "Failed to load recordbatch from the input stream");
 
+        timeUsage += System.currentTimeMillis();
         log.info("[timing][arrow]: load split for %d use %d", splitIndex, System.currentTimeMillis() - timeUsage);
 
         return table.getFieldVectors().stream().filter(field -> !skipType(field.getField().getType())).map(field -> {
@@ -211,6 +213,9 @@ public class ArrowClient
         reader.close();
         readers.remove(tableName);
         tables.remove(tableName);
+
+        val tablePath = config.getArrowRoot() + "/" + tableName + ".arrow";
+        new File(tablePath).delete();
     }
 
     public class ArrowChunkBuilder
@@ -289,7 +294,7 @@ public class ArrowClient
         private final List<FieldVector> vectors;
         private final VectorSchemaRoot root;
         private final FileOutputStream output;
-        private final ArrowStreamWriter writer;
+        private final ArrowFileWriter writer;
 
         @SneakyThrows(IOException.class)
         public ArrowTableBuilder(String tableName, Schema schema)
@@ -299,11 +304,13 @@ public class ArrowClient
             this.vectors = schema.getFields().stream().map(field -> field.createVector(Arrow.default_allocator)).collect(Collectors.toList());
             this.root = new VectorSchemaRoot(this.vectors);
             this.output = new FileOutputStream(tablePath);
-            this.writer = new ArrowStreamWriter(root, null, this.output.getChannel());
+            this.writer = new ArrowFileWriter(root, null, this.output.getChannel());
 
+            timeUsage -= System.currentTimeMillis();
             // start the writter
             this.writer.start();
             writer.writeBatch();
+            timeUsage += System.currentTimeMillis();
         }
 
         @Override
@@ -323,14 +330,17 @@ public class ArrowClient
         {
             timeUsage -= System.currentTimeMillis();
             this.writer.writeBatch();
+            this.output.flush();
             timeUsage += System.currentTimeMillis();
         }
 
         @Override
+        @SneakyThrows(IOException.class)
         public void finish()
         {
             timeUsage -= System.currentTimeMillis();
             log.info("finishing writing arrow files");
+            this.output.flush();
             this.writer.close();
 
             try {
