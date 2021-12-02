@@ -205,16 +205,16 @@ public class ArrowClient
     public void dropTable(String schemaName, String tableName)
     {
         assert schemaName.equals(SCHEMA_NAME);
-        if (!readers.containsKey(tableName)) {
-            throw new IndexOutOfBoundsException("table '" + tableName + "' doesn't exist");
+        val tablePath = getTablePath(schemaName, tableName);
+        if (!readers.containsKey(tablePath)) {
+            throw new IndexOutOfBoundsException("table '" + tableName + "' doesn't exist: " + tablePath);
         }
         val tables = schemas.get().get(SCHEMA_NAME);
-        val reader = readers.get(tableName);
+        val reader = readers.get(tablePath);
         reader.close();
-        readers.remove(tableName);
+        readers.remove(tablePath);
         tables.remove(tableName);
 
-        val tablePath = config.getArrowRoot() + "/" + tableName + ".arrow";
         new File(tablePath).delete();
     }
 

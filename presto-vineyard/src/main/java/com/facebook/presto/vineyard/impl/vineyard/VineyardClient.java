@@ -170,6 +170,7 @@ public class VineyardClient
         val table = this.batches.get(tablePath);
         val batch = table.getBatch(splitIndex).getBatch();
 
+        timeUsage += System.currentTimeMillis();
         log.info("[timing][vineyard]: load split for %d use %d", splitIndex, System.currentTimeMillis() - timeUsage);
 
         return batch.getFieldVectors().stream().filter(field -> !skipType(field.getField().getType())).map(field -> {
