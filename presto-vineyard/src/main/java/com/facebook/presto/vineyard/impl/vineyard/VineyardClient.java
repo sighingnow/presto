@@ -119,7 +119,7 @@ public class VineyardClient
         }
 
         timeUsage += System.currentTimeMillis();
-        log.info("[timing][vineyard]: initializing tables use %d", System.currentTimeMillis() - timeUsage);
+        log.info("[timing][vineyard]: initializing tables use %d", timeUsage);
 
         schema.put(SCHEMA_NAME, tables);
         return ImmutableMap.copyOf(schema);
@@ -171,7 +171,7 @@ public class VineyardClient
         val batch = table.getBatch(splitIndex).getBatch();
 
         timeUsage += System.currentTimeMillis();
-        log.info("[timing][vineyard]: load split for %d use %d", splitIndex, System.currentTimeMillis() - timeUsage);
+        log.info("[timing][vineyard]: load split for %d use %d", splitIndex, timeUsage);
 
         return batch.getFieldVectors().stream().filter(field -> !skipType(field.getField().getType())).map(field -> {
             return new ColumnarData(field);

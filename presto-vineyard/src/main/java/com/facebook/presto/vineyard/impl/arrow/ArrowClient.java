@@ -166,7 +166,7 @@ public class ArrowClient
         }
 
         timeUsage += System.currentTimeMillis();
-        log.info("[timing][arrow]: initializing tables use %d", System.currentTimeMillis() - timeUsage);
+        log.info("[timing][arrow]: initializing tables use %d", timeUsage);
 
         schema.put(SCHEMA_NAME, tables);
         return ImmutableMap.copyOf(schema);
@@ -187,7 +187,7 @@ public class ArrowClient
         checkState(reader.loadRecordBatch(reader.getRecordBlocks().get(splitIndex)), "Failed to load recordbatch from the input stream");
 
         timeUsage += System.currentTimeMillis();
-        log.info("[timing][arrow]: load split for %d use %d", splitIndex, System.currentTimeMillis() - timeUsage);
+        log.info("[timing][arrow]: load split for %d use %d", splitIndex, timeUsage);
 
         return table.getFieldVectors().stream().filter(field -> !skipType(field.getField().getType())).map(field -> {
             return new ColumnarData(field);
