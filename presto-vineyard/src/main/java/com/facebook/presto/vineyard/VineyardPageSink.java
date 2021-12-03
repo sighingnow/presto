@@ -59,9 +59,6 @@ public class VineyardPageSink
     @Override
     public synchronized CompletableFuture<?> appendPage(Page page)
     {
-        log.info("page = %s", page);
-        log.info("append page: %s: channel count = %d, position count = %d", page, page.getChannelCount(), page.getPositionCount());
-
         this.pending_pages.add(page);
         this.pending_records.getAndAdd(page.getPositionCount());
 

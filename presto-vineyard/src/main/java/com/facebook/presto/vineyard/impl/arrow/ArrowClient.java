@@ -173,7 +173,7 @@ public class ArrowClient
     }
 
     @Override
-    public List<ColumnarData> loadSplit(String tablePath, int splitIndex)
+    public synchronized List<ColumnarData> loadSplit(String tablePath, int splitIndex)
             throws IOException
     {
         long timeUsage = 0;
