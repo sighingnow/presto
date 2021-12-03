@@ -42,12 +42,12 @@ import org.apache.arrow.vector.LargeVarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.ipc.ArrowFileReader;
 import org.apache.arrow.vector.ipc.ArrowFileWriter;
-import org.apache.arrow.vector.ipc.ArrowStreamWriter;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FilenameFilter;
 import java.io.IOException;
@@ -71,7 +71,6 @@ public class ArrowClient
 
     private BufferAllocator allocator;
     private ConcurrentMap<String, ArrowFileReader> readers;
-    private Cache<String, Map<Integer, HostAddress>> tableSplits;
 
     public ArrowClient(VineyardConfig config, NodeManager manager)
     {
@@ -80,9 +79,8 @@ public class ArrowClient
         log.info("initializing arrow client");
 
         this.allocator = new RootAllocator();
-        this.readers = new ConcurrentSkipListMap<>();
         this.schemas = Suppliers.memoize(schemasSupplier(config.getArrowRoot()));
-        this.tableSplits = CacheBuilder.newBuilder().build();
+        this.readers = new ConcurrentSkipListMap<>();
     }
 
     @Override
@@ -98,24 +96,25 @@ public class ArrowClient
     }
 
     @Override
-    @SneakyThrows(ExecutionException.class)
+    @SneakyThrows({FileNotFoundException.class, IOException.class})
     public Map<Integer, HostAddress> getTableSplits(String schema, String tableName)
     {
+        long timeUsage = 0;
+        timeUsage -= System.currentTimeMillis();
+
         val tablePath = getTablePath(schema, tableName);
-        return tableSplits.get(tableName, new Callable<Map<Integer, HostAddress>>()
-        {
-            @Override
-            @SneakyThrows(IOException.class)
-            public Map<Integer, HostAddress> call()
-            {
-                val reader = readers.get(tablePath);
-                val splits = new ConcurrentSkipListMap<Integer, HostAddress>();
-                for (int index = 0; index < reader.getRecordBlocks().size(); ++index) {
-                    splits.put(index, manager.getCurrentNode().getHostAndPort());
-                }
-                return splits;
-            }
-        });
+        val reader = new ArrowFileReader(new FileInputStream(tablePath).getChannel(), allocator);
+        this.readers.put(tablePath, reader);
+        val table = reader.getVectorSchemaRoot();
+        val splits = ImmutableMap.<Integer, HostAddress>builder();
+        for (int index = 0; index < reader.getRecordBlocks().size(); ++index) {
+            splits.put(index, manager.getCurrentNode().getHostAndPort());
+        }
+
+        timeUsage += System.currentTimeMillis();
+        log.info("[timing][arrow]: initializing tables splits use %d", timeUsage);
+
+        return splits.build();
     }
 
     private Supplier<Map<String, Map<String, VineyardTable>>> schemasSupplier
@@ -182,7 +181,7 @@ public class ArrowClient
             throw new IOException("reader not found: " + tablePath);
         }
         timeUsage -= System.currentTimeMillis();
-        val reader = new ArrowFileReader(new FileInputStream(tablePath).getChannel(), allocator);
+        val reader = this.readers.get(tablePath);
         val table = reader.getVectorSchemaRoot();
         checkState(reader.loadRecordBatch(reader.getRecordBlocks().get(splitIndex)), "Failed to load recordbatch from the input stream");
 
@@ -343,18 +342,8 @@ public class ArrowClient
             this.output.flush();
             this.writer.close();
 
-            try {
-                val reader = new ArrowFileReader(new FileInputStream(tablePath).getChannel(), allocator);
-                val table = reader.getVectorSchemaRoot();
-
-                val tables = schemas.get().get(SCHEMA_NAME);
-                readers.put(tablePath, reader);
-                tables.put(tableName, buildTableSchemaFromArrowSchema(table.getSchema(), tableName, tablePath));
-            }
-            catch (IOException e) {
-                log.error("Failed to read the schema from arrow file: %s", e);
-                throw new UncheckedIOException(e);
-            }
+            val tables = schemas.get().get(SCHEMA_NAME);
+            tables.put(tableName, buildTableSchemaFromArrowSchema(schema, tableName, tablePath));
 
             timeUsage += System.currentTimeMillis();
             log.info("[timing][arrow]: create-then-finish tables use %d", timeUsage);
