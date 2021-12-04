@@ -320,6 +320,11 @@ public class VineyardClient
 
             log.info("[timing][vineyard]: create-then-finish tables use %d", timeUsage);
         }
+
+        @Override
+        public void abort()
+        {
+        }
     }
 
     static {

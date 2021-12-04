@@ -72,13 +72,14 @@ public class VineyardPageSink
         log.info("finish pages ...");
 
         this.flushPages(true);
-        tableBuilder.finish();
+        this.tableBuilder.finish();
         return CompletableFuture.completedFuture(ImmutableList.of());
     }
 
     @Override
     public void abort()
     {
+        this.tableBuilder.abort();
     }
 
     private void flushPages(boolean force) {

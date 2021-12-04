@@ -36,7 +36,6 @@ public final class VineyardOutputTableHandle
             @JsonProperty("table") VineyardTableHandle table,
             @JsonProperty("columns") Collection<VineyardColumnHandle> columns)
     {
-        log.info("outpout table: table = %s", table);
         this.table = requireNonNull(table, "table is null");
         this.columns = requireNonNull(columns, "table is null");
     }

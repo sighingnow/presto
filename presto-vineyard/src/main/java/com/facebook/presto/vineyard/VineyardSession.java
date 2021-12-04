@@ -258,5 +258,7 @@ public abstract class VineyardSession
         public abstract void finishChunk(ChunkBuilder builder);
 
         public abstract void finish();
+
+        public abstract void abort();
     }
 }

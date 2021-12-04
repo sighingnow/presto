@@ -21,8 +21,6 @@ import com.facebook.presto.vineyard.VineyardSession;
 import com.facebook.presto.vineyard.VineyardTable;
 import com.google.common.base.Supplier;
 import com.google.common.base.Suppliers;
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.ImmutableMap;
 import io.v6d.core.common.util.VineyardException;
 import io.v6d.modules.basic.arrow.Arrow;
@@ -39,9 +37,12 @@ import org.apache.arrow.vector.Float8Vector;
 import org.apache.arrow.vector.IntVector;
 import org.apache.arrow.vector.LargeVarBinaryVector;
 import org.apache.arrow.vector.LargeVarCharVector;
+import org.apache.arrow.vector.VectorLoader;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.ipc.ArrowFileReader;
 import org.apache.arrow.vector.ipc.ArrowFileWriter;
+import org.apache.arrow.vector.ipc.SeekableReadChannel;
+import org.apache.arrow.vector.ipc.message.MessageSerializer;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
 
@@ -55,13 +56,9 @@ import java.io.UncheckedIOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
-import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
-
-import static com.google.common.base.Preconditions.checkState;
 
 public class ArrowClient
         extends VineyardSession
@@ -70,6 +67,7 @@ public class ArrowClient
     private static final String SCHEMA_NAME = "arrow";
 
     private BufferAllocator allocator;
+    private ConcurrentMap<String, SeekableReadChannel> channels;
     private ConcurrentMap<String, ArrowFileReader> readers;
 
     public ArrowClient(VineyardConfig config, NodeManager manager)
@@ -80,6 +78,8 @@ public class ArrowClient
 
         this.allocator = new RootAllocator();
         this.schemas = Suppliers.memoize(schemasSupplier(config.getArrowRoot()));
+
+        this.channels = new ConcurrentSkipListMap<>();
         this.readers = new ConcurrentSkipListMap<>();
     }
 
@@ -103,16 +103,18 @@ public class ArrowClient
         timeUsage -= System.currentTimeMillis();
 
         val tablePath = getTablePath(schema, tableName);
-        val reader = new ArrowFileReader(new FileInputStream(tablePath).getChannel(), allocator);
+        val channel = new FileInputStream(tablePath).getChannel();
+        val reader = new ArrowFileReader(channel, allocator);
+        this.channels.put(tablePath, new SeekableReadChannel(channel));
         this.readers.put(tablePath, reader);
-        val table = reader.getVectorSchemaRoot();
         val splits = ImmutableMap.<Integer, HostAddress>builder();
         for (int index = 0; index < reader.getRecordBlocks().size(); ++index) {
             splits.put(index, manager.getCurrentNode().getHostAndPort());
+//            break;
         }
 
         timeUsage += System.currentTimeMillis();
-        log.info("[timing][arrow]: initializing tables splits use %d", timeUsage);
+        log.info("[timing][arrow]: initializing tables splits for %s use %d", tablePath, timeUsage);
 
         return splits.build();
     }
@@ -155,7 +157,6 @@ public class ArrowClient
                 val reader = new ArrowFileReader(new FileInputStream(tablePath).getChannel(), allocator);
                 val table = reader.getVectorSchemaRoot();
 
-                this.readers.put(tablePath, reader);
                 tables.put(tableName, buildTableSchemaFromArrowSchema(table.getSchema(), tableName, tablePath));
             }
             catch (IOException e) {
@@ -171,20 +172,32 @@ public class ArrowClient
         return ImmutableMap.copyOf(schema);
     }
 
+    @SneakyThrows(IOException.class)
+    private VectorSchemaRoot loadRecordBatch(final String tablePath, int splitIndex)
+    {
+        val channel = channels.get(tablePath);
+        val reader = readers.get(tablePath);
+        val table = VectorSchemaRoot.create(reader.getVectorSchemaRoot().getSchema(), Arrow.default_allocator);
+        val loader = new VectorLoader(table);
+
+        val block = reader.getRecordBlocks().get(splitIndex);
+        channel.setPosition(block.getOffset());
+        val batch = MessageSerializer.deserializeRecordBatch(channel, block, Arrow.default_allocator);
+        loader.load(batch);
+        return table;
+    }
+
     @Override
     public synchronized List<ColumnarData> loadSplit(String tablePath, int splitIndex)
             throws IOException
     {
         long timeUsage = 0;
-        if (!this.readers.containsKey(tablePath)) {
+        if (!this.channels.containsKey(tablePath) || !this.readers.containsKey(tablePath)) {
             log.error("reader not found for %s", tablePath);
             throw new IOException("reader not found: " + tablePath);
         }
         timeUsage -= System.currentTimeMillis();
-        val reader = this.readers.get(tablePath);
-        val table = reader.getVectorSchemaRoot();
-        checkState(reader.loadRecordBatch(reader.getRecordBlocks().get(splitIndex)), "Failed to load recordbatch from the input stream");
-
+        val table = this.loadRecordBatch(tablePath, splitIndex);
         timeUsage += System.currentTimeMillis();
         log.info("[timing][arrow]: load split for %d use %d", splitIndex, timeUsage);
 
@@ -208,10 +221,16 @@ public class ArrowClient
         if (!readers.containsKey(tablePath)) {
             throw new IndexOutOfBoundsException("table '" + tableName + "' doesn't exist: " + tablePath);
         }
-        val tables = schemas.get().get(SCHEMA_NAME);
+
         val reader = readers.get(tablePath);
         reader.close();
         readers.remove(tablePath);
+
+        val channel = channels.get(tablePath);
+        channel.close();
+        channels.remove(tablePath);
+
+        val tables = schemas.get().get(SCHEMA_NAME);
         tables.remove(tableName);
 
         new File(tablePath).delete();
@@ -308,7 +327,6 @@ public class ArrowClient
             timeUsage -= System.currentTimeMillis();
             // start the writter
             this.writer.start();
-            writer.writeBatch();
             timeUsage += System.currentTimeMillis();
         }
 
@@ -347,6 +365,16 @@ public class ArrowClient
 
             timeUsage += System.currentTimeMillis();
             log.info("[timing][arrow]: create-then-finish tables use %d", timeUsage);
+        }
+
+        @Override
+        @SneakyThrows(IOException.class)
+        public void abort()
+        {
+            this.output.flush();
+            this.writer.close();
+
+            new File(tablePath).delete();
         }
     }
 }
