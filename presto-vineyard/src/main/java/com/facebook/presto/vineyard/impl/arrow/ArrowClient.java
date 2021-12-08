@@ -110,7 +110,6 @@ public class ArrowClient
         val splits = ImmutableMap.<Integer, HostAddress>builder();
         for (int index = 0; index < reader.getRecordBlocks().size(); ++index) {
             splits.put(index, manager.getCurrentNode().getHostAndPort());
-//            break;
         }
 
         timeUsage += System.currentTimeMillis();
@@ -188,7 +187,7 @@ public class ArrowClient
     }
 
     @Override
-    public synchronized List<ColumnarData> loadSplit(String tablePath, int splitIndex)
+    public List<ColumnarData> loadSplit(String tablePath, int splitIndex)
             throws IOException
     {
         long timeUsage = 0;

@@ -163,7 +163,7 @@ public class VineyardClient
     }
 
     @Override
-    public synchronized List<ColumnarData> loadSplit(String tablePath, int splitIndex)
+    public List<ColumnarData> loadSplit(String tablePath, int splitIndex)
             throws IOException
     {
         long timeUsage = 0;
