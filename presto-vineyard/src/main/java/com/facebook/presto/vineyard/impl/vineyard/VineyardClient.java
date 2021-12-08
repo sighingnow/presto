@@ -29,14 +29,19 @@ import io.v6d.core.client.ds.ObjectFactory;
 import io.v6d.core.common.util.ObjectID;
 import io.v6d.core.common.util.VineyardException;
 import io.v6d.modules.basic.arrow.Arrow;
+import io.v6d.modules.basic.arrow.RecordBatch;
 import io.v6d.modules.basic.arrow.RecordBatchBuilder;
 import io.v6d.modules.basic.arrow.SchemaBuilder;
 import io.v6d.modules.basic.arrow.Table;
 import io.v6d.modules.basic.columnar.ColumnarData;
 import io.v6d.modules.basic.columnar.ColumnarDataBuilder;
+import io.v6d.modules.basic.dataframe.DataFrame;
+import io.v6d.modules.basic.stream.DataFrameStream;
 import lombok.SneakyThrows;
 import lombok.val;
 import org.apache.arrow.vector.types.pojo.Schema;
+
+import javax.validation.constraints.NotNull;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -267,16 +272,35 @@ public class VineyardClient
         }
     }
 
+    private String stripStreamSuffix(String tableName) {
+        if (tableName.endsWith("_stream")) {
+            return tableName.substring(0, tableName.length() - "_stream".length());
+        } else {
+            return tableName;
+        }
+    }
+
     public class VineyardTableBuilder
             extends TableBuilder
     {
         private long timeUsage = 0;
         private final io.v6d.modules.basic.arrow.TableBuilder tableBuilder;
 
+        private final DataFrameStream stream;
+
+        @SneakyThrows(VineyardException.class)
         public VineyardTableBuilder(String tableName, Schema schema)
         {
-            super(tableName, schema);
+            super(stripStreamSuffix(tableName), schema);
             this.tableBuilder = new io.v6d.modules.basic.arrow.TableBuilder(client, SchemaBuilder.fromSchema(schema));
+
+            if (tableName.endsWith("_stream")) {
+                this.stream = DataFrameStream.create(client);
+                client.persist(this.stream.getId());
+                client.putName(this.stream.getId(), tableName);
+            } else {
+                stream = null;
+            }
         }
 
         @Override
@@ -287,11 +311,17 @@ public class VineyardClient
         }
 
         @Override
+        @SneakyThrows(VineyardException.class)
         public void finishChunk(ChunkBuilder builder)
         {
             timeUsage -= System.currentTimeMillis();
             val chunk = (VineyardChunkBuilder) builder;
-            tableBuilder.addBatch(chunk.getBatch());
+            val meta = chunk.getBatch().seal(client);
+            val batch = (RecordBatch) ObjectFactory.getFactory().resolve(meta);
+            tableBuilder.addBatch(batch);
+            if (this.stream != null) {
+                stream.writer().append(meta.getId());
+            }
             timeUsage += System.currentTimeMillis();
         }
 
@@ -310,6 +340,10 @@ public class VineyardClient
             client.persist(meta);
             client.putName(meta.getId(), tableName);
 
+            if (this.stream != null) {
+                this.stream.writer().finish();
+            }
+
             val tables = schemas.get().get(SCHEMA_NAME);
             batches.put(id, table);
             tables.put(id, prestoTable);
@@ -322,8 +356,10 @@ public class VineyardClient
         }
 
         @Override
+        @SneakyThrows(VineyardException.class)
         public void abort()
         {
+            this.stream.writer().fail();
         }
     }
 
