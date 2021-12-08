@@ -174,20 +174,22 @@ public class ArrowClient
     @SneakyThrows(IOException.class)
     private VectorSchemaRoot loadRecordBatch(final String tablePath, int splitIndex)
     {
-        val channel = channels.get(tablePath);
         val reader = readers.get(tablePath);
         val table = VectorSchemaRoot.create(reader.getVectorSchemaRoot().getSchema(), Arrow.default_allocator);
         val loader = new VectorLoader(table);
 
         val block = reader.getRecordBlocks().get(splitIndex);
-        channel.setPosition(block.getOffset());
-        val batch = MessageSerializer.deserializeRecordBatch(channel, block, Arrow.default_allocator);
-        loader.load(batch);
+        // create a new channel
+        try (val channel = new SeekableReadChannel(new FileInputStream(tablePath).getChannel())) {
+            channel.setPosition(block.getOffset());
+            val batch = MessageSerializer.deserializeRecordBatch(channel, block, Arrow.default_allocator);
+            loader.load(batch);
+        }
         return table;
     }
 
     @Override
-    public synchronized List<ColumnarData> loadSplit(String tablePath, int splitIndex)
+    public List<ColumnarData> loadSplit(String tablePath, int splitIndex)
             throws IOException
     {
         long timeUsage = 0;
