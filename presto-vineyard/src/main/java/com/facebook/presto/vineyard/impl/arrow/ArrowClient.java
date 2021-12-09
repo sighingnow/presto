@@ -44,6 +44,7 @@ import org.apache.arrow.vector.ipc.ArrowFileWriter;
 import org.apache.arrow.vector.ipc.ArrowStreamWriter;
 import org.apache.arrow.vector.ipc.ArrowWriter;
 import org.apache.arrow.vector.ipc.SeekableReadChannel;
+import org.apache.arrow.vector.ipc.message.ArrowBlock;
 import org.apache.arrow.vector.ipc.message.MessageSerializer;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
@@ -55,12 +56,14 @@ import java.io.FileOutputStream;
 import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 public class ArrowClient
         extends VineyardSession
@@ -71,6 +74,7 @@ public class ArrowClient
     private BufferAllocator allocator;
     private ConcurrentMap<String, SeekableReadChannel> channels;
     private ConcurrentMap<String, ArrowFileReader> readers;
+    private ConcurrentMap<String, ArrayList<VectorSchemaRoot>> tables;
 
     public ArrowClient(VineyardConfig config, NodeManager manager)
     {
@@ -83,6 +87,7 @@ public class ArrowClient
 
         this.channels = new ConcurrentSkipListMap<>();
         this.readers = new ConcurrentSkipListMap<>();
+        this.tables = new ConcurrentSkipListMap<>();
     }
 
     @Override
@@ -109,10 +114,17 @@ public class ArrowClient
         val reader = new ArrowFileReader(channel, allocator);
         this.channels.put(tablePath, new SeekableReadChannel(channel));
         this.readers.put(tablePath, reader);
+
         val splits = ImmutableMap.<Integer, HostAddress>builder();
         for (int index = 0; index < reader.getRecordBlocks().size(); ++index) {
             splits.put(index, manager.getCurrentNode().getHostAndPort());
         }
+
+        val tableSchema = reader.getVectorSchemaRoot().getSchema();
+        val chunks = reader.getRecordBlocks().parallelStream().map(block -> {
+            return this.loadRecordBatch(tableSchema, block, tablePath);
+        }).collect(Collectors.toList());
+        this.tables.put(tablePath, new ArrayList<>(chunks));
 
         timeUsage += System.currentTimeMillis();
         log.info("[timing][arrow]: initializing tables splits for %s use %d", tablePath, timeUsage);
@@ -174,17 +186,21 @@ public class ArrowClient
     }
 
     @SneakyThrows(IOException.class)
-    private VectorSchemaRoot loadRecordBatch(final String tablePath, int splitIndex)
+    private VectorSchemaRoot loadRecordBatch(
+            final Schema schema,
+            final ArrowBlock block,
+            final String tablePath)
     {
-        val reader = readers.get(tablePath);
-        val table = VectorSchemaRoot.create(reader.getVectorSchemaRoot().getSchema(), Arrow.default_allocator);
+        val table = VectorSchemaRoot.create(
+                schema,
+                Arrow.default_allocator);
         val loader = new VectorLoader(table);
 
-        val block = reader.getRecordBlocks().get(splitIndex);
         // create a new channel
         try (val channel = new SeekableReadChannel(new FileInputStream(tablePath).getChannel())) {
             channel.setPosition(block.getOffset());
-            val batch = MessageSerializer.deserializeRecordBatch(channel, block, Arrow.default_allocator);
+            val batch = MessageSerializer.deserializeRecordBatch(
+                    channel, block, Arrow.default_allocator);
             loader.load(batch);
         }
         return table;
@@ -199,12 +215,16 @@ public class ArrowClient
             log.error("reader not found for %s", tablePath);
             throw new IOException("reader not found: " + tablePath);
         }
+        if (!this.tables.containsKey(tablePath)) {
+            log.error("table batches not found for %s", tablePath);
+        }
         timeUsage -= System.currentTimeMillis();
-        val table = this.loadRecordBatch(tablePath, splitIndex);
+        val table = this.tables.get(tablePath).get(splitIndex);
         timeUsage += System.currentTimeMillis();
         log.info("[timing][arrow]: load split for %d use %d", splitIndex, timeUsage);
 
-        return table.getFieldVectors().stream().filter(field -> !skipType(field.getField().getType())).map(field -> {
+        return table.getFieldVectors().stream().filter(
+                field -> !skipType(field.getField().getType())).map(field -> {
             return new ColumnarData(field);
         }).collect(Collectors.toList());
     }
