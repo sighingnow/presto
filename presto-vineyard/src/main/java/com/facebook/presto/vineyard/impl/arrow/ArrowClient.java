@@ -325,7 +325,7 @@ public class ArrowClient
             this.vectors = schema.getFields().stream().map(field -> field.createVector(Arrow.default_allocator)).collect(Collectors.toList());
             this.root = new VectorSchemaRoot(this.vectors);
             this.output = new FileOutputStream(tablePath);
-            if (this.tablePath.endsWith("_stream")) {
+            if (this.tableName.endsWith("_stream")) {
                 this.writer = new ArrowStreamWriter(root, null, this.output.getChannel());
             } else {
                 this.writer = new ArrowFileWriter(root, null, this.output.getChannel());
