@@ -41,6 +41,8 @@ import org.apache.arrow.vector.VectorLoader;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.ipc.ArrowFileReader;
 import org.apache.arrow.vector.ipc.ArrowFileWriter;
+import org.apache.arrow.vector.ipc.ArrowStreamWriter;
+import org.apache.arrow.vector.ipc.ArrowWriter;
 import org.apache.arrow.vector.ipc.SeekableReadChannel;
 import org.apache.arrow.vector.ipc.message.MessageSerializer;
 import org.apache.arrow.vector.types.pojo.Field;
@@ -313,7 +315,7 @@ public class ArrowClient
         private final List<FieldVector> vectors;
         private final VectorSchemaRoot root;
         private final FileOutputStream output;
-        private final ArrowFileWriter writer;
+        private final ArrowWriter writer;
 
         @SneakyThrows(IOException.class)
         public ArrowTableBuilder(String tableName, Schema schema)
@@ -323,7 +325,11 @@ public class ArrowClient
             this.vectors = schema.getFields().stream().map(field -> field.createVector(Arrow.default_allocator)).collect(Collectors.toList());
             this.root = new VectorSchemaRoot(this.vectors);
             this.output = new FileOutputStream(tablePath);
-            this.writer = new ArrowFileWriter(root, null, this.output.getChannel());
+            if (this.tablePath.endsWith("_stream")) {
+                this.writer = new ArrowStreamWriter(root, null, this.output.getChannel());
+            } else {
+                this.writer = new ArrowFileWriter(root, null, this.output.getChannel());
+            }
 
             timeUsage -= System.currentTimeMillis();
             // start the writter
