@@ -220,6 +220,11 @@ public class VineyardClient
         }
     }
 
+    @Override
+    public void resetReaders()
+    {
+    }
+
     public class VineyardChunkBuilder
             extends ChunkBuilder
     {

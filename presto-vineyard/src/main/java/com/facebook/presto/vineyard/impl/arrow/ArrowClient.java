@@ -259,6 +259,31 @@ public class ArrowClient
         new File(tablePath).delete();
     }
 
+    @Override
+    public void resetReaders()
+    {
+        for (val chunks: this.tables.values()) {
+            for (val chunk: chunks) {
+                chunk.close();
+            }
+        }
+        this.tables.clear();
+        for (val reader: this.readers.values()) {
+            try {
+                reader.close();
+            } catch (IOException e) {
+            }
+        }
+        this.readers.clear();
+        for (val channel: this.channels.values()) {
+            try {
+                channel.close();
+            } catch (IOException e) {
+            }
+        }
+        this.channels.clear();
+    }
+
     public class ArrowChunkBuilder
             extends ChunkBuilder
     {

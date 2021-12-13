@@ -222,7 +222,21 @@ public class VineyardMetadata
     public Optional<ConnectorOutputMetadata> finishCreateTable(ConnectorSession session, ConnectorOutputTableHandle tableHandle, Collection<Slice> fragments, Collection<ComputedStatistics> computedStatistics)
     {
         log.info("finish create: handle = %s, fragments = %s, stats = %s", tableHandle, fragments, computedStatistics);
+        this.vineyardSession.resetReaders();
         return Optional.empty();
+    }
+
+    @Override
+    public void beginQuery(ConnectorSession session)
+    {
+        ConnectorMetadata.super.beginQuery(session);
+    }
+
+    @Override
+    public void cleanupQuery(ConnectorSession session)
+    {
+        this.vineyardSession.resetReaders();
+        ConnectorMetadata.super.cleanupQuery(session);
     }
 
     @Override

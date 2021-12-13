@@ -235,6 +235,8 @@ public abstract class VineyardSession
 
     public abstract void dropTable(String schemaName, String tableName);
 
+    public abstract void resetReaders();
+
     public abstract class ChunkBuilder
     {
         public abstract List<ColumnarDataBuilder> getColumns();
